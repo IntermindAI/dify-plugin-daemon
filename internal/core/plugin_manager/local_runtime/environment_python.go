@@ -23,16 +23,26 @@ import (
 //go:embed patches/0.0.1b70.ai_model.py.patch
 var pythonPatches []byte
 
+func (p *LocalPluginRuntime) VenvPath() string {
+    if envPath := os.Getenv("PLUGIN_DEPENDENCY_PATH"); envPath != "" {
+        // Create a unique venv name based on the working path
+        venvName := filepath.Base(p.State.WorkingPath)
+        return filepath.Join(envPath, venvName)
+    }
+    return filepath.Join(p.State.WorkingPath, ".venv")
+}
+
 func (p *LocalPluginRuntime) InitPythonEnvironment() error {
+	venvPath := p.VenvPath()
 	// check if virtual environment exists
-	if _, err := os.Stat(path.Join(p.State.WorkingPath, ".venv")); err == nil {
+	if _, err := os.Stat(venvPath); err == nil {
 		// check if venv is valid, try to find .venv/dify/plugin.json
-		if _, err := os.Stat(path.Join(p.State.WorkingPath, ".venv/dify/plugin.json")); err != nil {
+		if _, err := os.Stat(path.Join(venvPath, "dify/plugin.json")); err != nil {
 			// remove the venv and rebuild it
-			os.RemoveAll(path.Join(p.State.WorkingPath, ".venv"))
+			os.RemoveAll(venvPath)
 		} else {
 			// setup python interpreter path
-			pythonPath, err := filepath.Abs(path.Join(p.State.WorkingPath, ".venv/bin/python"))
+			pythonPath, err := filepath.Abs(path.Join(venvPath, "bin/python"))
 			if err != nil {
 				return fmt.Errorf("failed to find python: %s", err)
 			}
@@ -61,7 +71,7 @@ func (p *LocalPluginRuntime) InitPythonEnvironment() error {
 
 	uvPath := strings.TrimSpace(string(output))
 
-	cmd = exec.Command(uvPath, "venv", ".venv", "--python", "3.12")
+	cmd = exec.Command(uvPath, "venv", venvPath, "--python", "3.12")
 	cmd.Dir = p.State.WorkingPath
 	b := bytes.NewBuffer(nil)
 	cmd.Stdout = b
@@ -72,16 +82,16 @@ func (p *LocalPluginRuntime) InitPythonEnvironment() error {
 	defer func() {
 		// if init failed, remove the .venv directory
 		if !success {
-			os.RemoveAll(path.Join(p.State.WorkingPath, ".venv"))
+			os.RemoveAll(venvPath)
 		} else {
 			// create dify/plugin.json
-			pluginJsonPath := path.Join(p.State.WorkingPath, ".venv/dify/plugin.json")
+			pluginJsonPath := path.Join(venvPath, "dify/plugin.json")
 			os.MkdirAll(path.Dir(pluginJsonPath), 0755)
 			os.WriteFile(pluginJsonPath, []byte(`{"timestamp":`+strconv.FormatInt(time.Now().Unix(), 10)+`}`), 0644)
 		}
 	}()
 
-	pythonPath, err := filepath.Abs(path.Join(p.State.WorkingPath, ".venv/bin/python"))
+	pythonPath, err := filepath.Abs(path.Join(venvPath, "bin/python"))
 	if err != nil {
 		return fmt.Errorf("failed to find python: %s", err)
 	}
@@ -120,7 +130,7 @@ func (p *LocalPluginRuntime) InitPythonEnvironment() error {
 
 	args = append([]string{"pip"}, args...)
 
-	virtualEnvPath := path.Join(p.State.WorkingPath, ".venv")
+	virtualEnvPath := venvPath // path.Join(p.State.WorkingPath, ".venv")
 	cmd = exec.CommandContext(ctx, uvPath, args...)
 	cmd.Env = append(cmd.Env, "VIRTUAL_ENV="+virtualEnvPath, "PATH="+os.Getenv("PATH"))
 	if p.HttpProxy != "" {
